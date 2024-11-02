@@ -42,33 +42,101 @@ const tokenAbi = [
   "function nonces(address owner) external view returns (uint256)",
 ];
 
-async function getContractVersion(contract: ethers.Contract): Promise<string> {
-  let contractVersion = "1";
-  try {
-    contractVersion = await contract.version();
-  } catch {
-    // do nothing
-  }
-  return contractVersion;
+// NVIDIA 0x4B47153A241b9d22ae37c2aAEe7A6519fF2Dbfc6
+// APPLE 0xD771a71E5bb303da787b4ba2ce559e39dc6eD85c
+// AMZN 0x8D66331a76060e57E1d8Af220E535e354f13fE58
+
+const STOCK_ADDRESSES = {
+  APPLE: "0xD771a71E5bb303da787b4ba2ce559e39dc6eD85c",
+  AMZN: "0x92d95BCB50B83d488bBFA18776ADC1553d3a8914",
+  NVIDIA: "0x4B47153A241b9d22ae37c2aAEe7A6519fF2Dbfc6",
+  TSLA: "0x7ec6109693fe6544DE4151c51FB4A41b279AdcE6",
+  GOOGL: "0x56C4C5986C29d2289933B1D0baD13C01295c9Cd7",
+} as const;
+
+const STOCK_NAMES = {
+  [STOCK_ADDRESSES.APPLE]: "apple",
+  [STOCK_ADDRESSES.AMZN]: "amazon",
+  [STOCK_ADDRESSES.NVIDIA]: "nvidia",
+  [STOCK_ADDRESSES.TSLA]: "tesla",
+  [STOCK_ADDRESSES.GOOGL]: "google",
+} as const;
+
+const ASSET_TOKEN_ADDRESS = STOCK_ADDRESSES.TSLA;
+
+async function sendToken(
+  smartAccountClient: any,
+  asset: string = STOCK_ADDRESSES.AMZN,
+  to: string = "0x71042ECc83238a3BF5a30f689F6505f895C5F424"
+) {
+  const tokenAmount = BigInt(0.01 * 10 ** 18);
+  const approvalData = encodeFunctionData({
+    abi: [
+      {
+        name: "approve",
+        type: "function",
+        stateMutability: "nonpayable",
+        inputs: [
+          { name: "spender", type: "address" },
+          { name: "amount", type: "uint256" },
+        ],
+        outputs: [{ type: "bool" }],
+      },
+    ],
+    functionName: "approve",
+    args: [asset as Address, tokenAmount],
+  }) as Hex;
+  // Transfer asset token
+  const transferData = encodeFunctionData({
+    abi: [
+      {
+        name: "transfer",
+        type: "function",
+        stateMutability: "nonpayable",
+        inputs: [
+          { name: "recipient", type: "address" },
+          { name: "amount", type: "uint256" },
+        ],
+        outputs: [{ type: "bool" }],
+      },
+    ],
+    functionName: "transfer",
+    args: [to as Address, tokenAmount],
+  }) as Hex;
+
+  const transactions_1 = [
+    {
+      to: ASSET_TOKEN_ADDRESS as Address,
+      data: approvalData,
+      value: 0n,
+    },
+    {
+      to: ASSET_TOKEN_ADDRESS as Address,
+      data: transferData,
+      value: 0n,
+    },
+  ];
+
+  const txHash = await smartAccountClient.sendTransactions({
+    transactions: transactions_1,
+  });
+  console.log("Transfer Hash:", txHash);
 }
 
+// Environment setup
+const PRIVATE_KEY = process.env.PRIVATE_KEY as Hex;
+const RPC_URL = process.env.RPC_URL;
+
+const PAYMENT_TOKEN_ADDRESS = process.env.PAYMENTTOKEN;
+const DINARI_API_KEY = process.env.DINARI_API_KEY;
+const PIMLICO_API_KEY = process.env.PIMLICO_API_KEY;
+
 async function main() {
-
-
-  // Environment setup
-  const privateKey = process.env.PRIVATE_KEY as Hex;
-  const RPC_URL = process.env.RPC_URL;
-  const assetTokenAddress = process.env.ASSETTOKEN;
-  const paymentTokenAddress = process.env.PAYMENTTOKEN;
-  const dinariApiKey = process.env.DINARI_API_KEY;
-  const PIMLICO_API_KEY = process.env.PIMLICO_API_KEY;
-
   if (
-    !privateKey ||
+    !PRIVATE_KEY ||
     !RPC_URL ||
-    !assetTokenAddress ||
-    !paymentTokenAddress ||
-    !dinariApiKey ||
+    !PAYMENT_TOKEN_ADDRESS ||
+    !DINARI_API_KEY ||
     !PIMLICO_API_KEY
   ) {
     throw new Error("Missing environment variables");
@@ -77,7 +145,7 @@ async function main() {
   const dinariClient = axios.create({
     baseURL: "https://api-enterprise.sandbox.dinari.com",
     headers: {
-      Authorization: `Bearer ${dinariApiKey}`,
+      Authorization: `Bearer ${DINARI_API_KEY}`,
       "Content-Type": "application/json",
     },
   });
@@ -85,39 +153,36 @@ async function main() {
   // Setup provider and signer
   // Setup provider and EOA signer
   const provider = ethers.getDefaultProvider(RPC_URL);
-  const eoaSigner = new ethers.Wallet(privateKey, provider);
+  const eoaSigner = new ethers.Wallet(PRIVATE_KEY, provider);
   console.log(`EOA Signer Address: ${eoaSigner.address}`);
   const chainId = Number((await provider.getNetwork()).chainId);
 
   // ------------------ Smart Account Setup ------------------
 
   const { publicClient, bundlerClient, paymasterClient, bundlerUrl } =
-    await setupClients(RPC_URL, PIMLICO_API_KEY, privateKey);
+    await setupClients(RPC_URL, PIMLICO_API_KEY);
 
   const { account, smartAccountClient } = await setupSmartAccount(
     publicClient,
-    privateKey,
+    PRIVATE_KEY,
     bundlerUrl,
     bundlerClient,
     paymasterClient
   );
 
   const { paymentToken, assetToken, orderProcessor, orderProcessorAddress } =
-    await setupContracts(
-      provider,
-      chainId,
-      paymentTokenAddress,
-      assetTokenAddress
-    );
+    await setupContracts(provider, chainId, PAYMENT_TOKEN_ADDRESS);
 
   // ------------------ Order Configuration ------------------
+
+  const stock = STOCK_NAMES[ASSET_TOKEN_ADDRESS];
+  console.log("stock", stock, ASSET_TOKEN_ADDRESS);
 
   const orderParams = await configureOrder(
     orderProcessor,
     assetToken,
     account.address, // smart account address
-    assetTokenAddress,
-    paymentTokenAddress
+    PAYMENT_TOKEN_ADDRESS
   );
   console.log("orderParams", orderParams);
 
@@ -138,6 +203,36 @@ async function main() {
 
   // ------------------ Create Batch Transaction ------------------
 
+  console.log("orderParams.recipient", orderParams.recipient);
+
+  try {
+    await sendToken(smartAccountClient);
+    await createOrder(
+      orderProcessor,
+      smartAccountClient,
+      bundlerClient,
+      publicClient,
+      orderParams,
+      feeQuoteResponse,
+      totalSpendAmount,
+      orderProcessorAddress
+    );
+  } catch (error) {
+    console.error("Error:", error);
+  }
+}
+
+async function createOrder(
+  orderProcessor: ethers.Contract,
+  smartAccountClient: any,
+  bundlerClient: any,
+  publicClient: any,
+  orderParams: OrderParams,
+  feeQuoteResponse: any,
+  totalSpendAmount: bigint,
+  orderProcessorAddress: string
+) {
+  // 1. Encode approval data
   const approvalData = encodeFunctionData({
     abi: [
       {
@@ -152,10 +247,8 @@ async function main() {
       },
     ],
     functionName: "approve",
-    args: [orderProcessorAddress, totalSpendAmount],
+    args: [orderProcessorAddress as Address, totalSpendAmount],
   }) as Hex;
-
-  console.log("orderParams.recipient", orderParams.recipient);
   // 2. Encode order creation call
   const createOrderData = encodeFunctionData({
     abi: orderProcessorAbi,
@@ -183,32 +276,27 @@ async function main() {
       feeQuoteResponse.fee_quote_signature,
     ],
   }) as Hex;
+  // 3. Create batch transaction data
+  const transactions = [
+    {
+      to: PAYMENT_TOKEN_ADDRESS as Address,
+      data: approvalData as Hex,
+      value: 0n,
+    },
+    {
+      to: orderProcessorAddress as Address,
+      data: createOrderData as Hex,
+      value: 0n,
+    },
+  ];
 
-  try {
-    // 3. Create batch transaction data
-    const transactions = [
-      {
-        to: paymentTokenAddress as Address,
-        data: approvalData as Hex,
-        value: 0n,
-      },
-      {
-        to: orderProcessorAddress as Address,
-        data: createOrderData as Hex,
-        value: 0n,
-      },
-    ];
-
-    await executeOrderTransaction(
-      smartAccountClient,
-      bundlerClient,
-      publicClient,
-      transactions,
-      orderProcessor
-    );
-  } catch (error) {
-    console.error("Error:", error);
-  }
+  await executeOrderTransaction(
+    smartAccountClient,
+    bundlerClient,
+    publicClient,
+    transactions,
+    orderProcessor
+  );
 }
 
 main()
@@ -218,33 +306,40 @@ main()
     process.exit(1);
   });
 
+interface OrderParams {
+  requestTimestamp: number;
+  recipient: string;
+  assetToken: string;
+  paymentToken: string;
+  sell: boolean;
+  orderType: number;
+  assetTokenQuantity: number;
+  paymentTokenQuantity: number;
+  price: number;
+  tif: number;
+}
 async function configureOrder(
   orderProcessor: ethers.Contract,
   assetToken: ethers.Contract,
   recipientAddress: string,
-  assetTokenAddress: string,
-  paymentTokenAddress: string
-) {
+  paymentTokenAddress: string,
+  amount: number = 100 * 10 ** 6
+): Promise<OrderParams> {
   // buy order amount (1 USDC)
-  const orderAmount = BigInt(1_000_000);
+  const orderAmount = BigInt(amount);
   const sellOrder = false;
   const orderType = Number(0);
   const limitPrice = Number(0);
 
   // Check order precision for sell orders
   if (sellOrder) {
-    await validateSellOrderPrecision(
-      orderProcessor,
-      assetToken,
-      assetTokenAddress,
-      orderAmount
-    );
+    await validateSellOrderPrecision(orderProcessor, assetToken, orderAmount);
   }
 
   return {
     requestTimestamp: Date.now(),
     recipient: recipientAddress,
-    assetToken: assetTokenAddress,
+    assetToken: ASSET_TOKEN_ADDRESS,
     paymentToken: paymentTokenAddress,
     sell: sellOrder,
     orderType: orderType,
@@ -258,11 +353,10 @@ async function configureOrder(
 async function validateSellOrderPrecision(
   orderProcessor: ethers.Contract,
   assetToken: ethers.Contract,
-  assetTokenAddress: string,
   orderAmount: bigint
 ) {
   const allowedDecimalReduction = await orderProcessor.orderDecimalReduction(
-    assetTokenAddress
+    ASSET_TOKEN_ADDRESS
   );
   const allowablePrecisionReduction = 10 ** allowedDecimalReduction;
 
@@ -296,11 +390,7 @@ async function getFeeQuote(
   };
 }
 
-async function setupClients(
-  RPC_URL: string,
-  PIMLICO_API_KEY: string,
-  privateKey: Hex
-) {
+async function setupClients(RPC_URL: string, PIMLICO_API_KEY: string) {
   const bundlerUrl = `https://api.pimlico.io/v2/sepolia/rpc?apikey=${PIMLICO_API_KEY}`;
 
   const publicClient = createPublicClient({
@@ -352,8 +442,7 @@ async function setupSmartAccount(
 async function setupContracts(
   provider: ethers.providers.Provider,
   chainId: number,
-  paymentTokenAddress: string,
-  assetTokenAddress: string
+  paymentTokenAddress: string
 ) {
   const orderProcessorAddress = orderProcessorData.networkAddresses[chainId];
 
@@ -362,7 +451,11 @@ async function setupContracts(
     tokenAbi,
     provider
   );
-  const assetToken = new ethers.Contract(assetTokenAddress, tokenAbi, provider);
+  const assetToken = new ethers.Contract(
+    ASSET_TOKEN_ADDRESS,
+    tokenAbi,
+    provider
+  );
   const orderProcessor = new ethers.Contract(
     orderProcessorAddress,
     orderProcessorAbi,
