@@ -54,6 +54,10 @@ const STOCK_ADDRESSES = {
   GOOGL: "0x56C4C5986C29d2289933B1D0baD13C01295c9Cd7",
 } as const;
 
+const ISAAC_MAIN_WALLET = "0x02C48c159FDfc1fC18BA0323D67061dE1dEA329F";
+const RICARDO_ADDRESS = "0x71042ECc83238a3BF5a30f689F6505f895C5F424";
+const ISAAC_ADDRESS = "0x862144d2BFd5d2865A8ac479F33f8B54d7ef3Bf5";
+
 const STOCK_NAMES = {
   [STOCK_ADDRESSES.APPLE]: "apple",
   [STOCK_ADDRESSES.AMZN]: "amazon",
@@ -62,14 +66,15 @@ const STOCK_NAMES = {
   [STOCK_ADDRESSES.GOOGL]: "google",
 } as const;
 
-const ASSET_TOKEN_ADDRESS = STOCK_ADDRESSES.TSLA;
+const ASSET_TOKEN_ADDRESS = STOCK_ADDRESSES.NVIDIA;
+const SENT_STOCKS = true;
 
 async function sendToken(
   smartAccountClient: any,
-  asset: string = STOCK_ADDRESSES.AMZN,
-  to: string = "0x71042ECc83238a3BF5a30f689F6505f895C5F424"
+  asset: string = STOCK_ADDRESSES.APPLE,
+  to: string = ISAAC_MAIN_WALLET
 ) {
-  const tokenAmount = BigInt(0.01 * 10 ** 18);
+  const tokenAmount = BigInt(0.1 * 10 ** 18);
   const approvalData = encodeFunctionData({
     abi: [
       {
@@ -106,12 +111,12 @@ async function sendToken(
 
   const transactions_1 = [
     {
-      to: ASSET_TOKEN_ADDRESS as Address,
+      to: asset as Address,
       data: approvalData,
       value: 0n,
     },
     {
-      to: ASSET_TOKEN_ADDRESS as Address,
+      to: asset as Address,
       data: transferData,
       value: 0n,
     },
@@ -120,7 +125,7 @@ async function sendToken(
   const txHash = await smartAccountClient.sendTransactions({
     transactions: transactions_1,
   });
-  console.log("Transfer Hash:", txHash);
+  console.log("sent token Hash:", txHash);
 }
 
 // Environment setup
@@ -206,17 +211,20 @@ async function main() {
   console.log("orderParams.recipient", orderParams.recipient);
 
   try {
-    await sendToken(smartAccountClient);
-    await createOrder(
-      orderProcessor,
-      smartAccountClient,
-      bundlerClient,
-      publicClient,
-      orderParams,
-      feeQuoteResponse,
-      totalSpendAmount,
-      orderProcessorAddress
-    );
+    if (SENT_STOCKS) {
+      await sendToken(smartAccountClient);
+    } else {
+      await createOrder(
+        orderProcessor,
+        smartAccountClient,
+        bundlerClient,
+        publicClient,
+        orderParams,
+        feeQuoteResponse,
+        totalSpendAmount,
+        orderProcessorAddress
+      );
+    }
   } catch (error) {
     console.error("Error:", error);
   }
